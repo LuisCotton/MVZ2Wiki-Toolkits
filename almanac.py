@@ -17,7 +17,7 @@ COLOR_RE = re.compile(r'<color\s*=\s*(["\']?)([^"\'>\s]+)\1\s*>(.*?)</color>', r
 WIKI_LINK_RE = re.compile(r'\[\[.*?]]', re.S)
 HASH_LINE_RE = re.compile(r'^(#+)(.*?)(#+)$')
 HTML_TAG_RE = re.compile(r'<[^>]+>')
-WIKI_JSON_TITLE = "Almanac.json"
+WIKI_JSON_TITLE = "Module:Almanac.json"
 
 
 def short(value):

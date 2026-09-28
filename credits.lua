@@ -6,9 +6,9 @@ local function loadData()
     if dataCache then
         return dataCache
     end
-    local ok, data = pcall(mw.loadJsonData, 'Credits.json')
+    local ok, data = pcall(mw.loadJsonData, 'Module:Credits.json')
     if not ok or type(data) ~= 'table' then
-        local title = mw.title.new('Credits.json')
+        local title = mw.title.new('Module:Credits.json')
         if not title or not title.exists then
             return nil
         end
@@ -44,7 +44,7 @@ end
 function p.getCredits(frame)
     local data = loadData()
     if not data then
-        return '错误：无法加载 [[Credits.json]]'
+        return '错误：无法加载 [[Module:Credits.json]]'
     end
 
     local result = {}

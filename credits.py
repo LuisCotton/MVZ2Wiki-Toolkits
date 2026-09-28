@@ -4,7 +4,7 @@ import xml.etree.ElementTree as ET
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-WIKI_JSON_TITLE = "Credits.json"
+WIKI_JSON_TITLE = "Module:Credits.json"
 
 
 def clean_text(value):
