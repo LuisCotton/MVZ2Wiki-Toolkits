@@ -56,6 +56,7 @@ end
 
 local function plain(text)
     text = format(text)
+    text = text:gsub('<br%s*/?>', '\n')
     return mw.text.trim((text:gsub('<[^>]+>', '')))
 end
 
@@ -72,11 +73,11 @@ local function join(value, separator)
 end
 
 local function override(frame, name, aliases)
-    if nonEmpty(frame.args[name]) then
+    if frame.args[name] ~= nil then
         return frame.args[name]
     end
     for _, alias in ipairs(aliases or {}) do
-        if nonEmpty(frame.args[alias]) then
+        if frame.args[alias] ~= nil then
             return frame.args[alias]
         end
     end
@@ -112,6 +113,9 @@ local function field(item, key)
     local fields = item.almanacFields or {}
     if nonEmpty(fields[key]) then
         return fields[key]
+    end
+    if item.properties ~= nil then
+        return nil
     end
     local info = item.infobox or {}
     if nonEmpty(info[key]) then
@@ -156,25 +160,32 @@ local function params(frame, item, page)
         end
     end
 
-    local outputFields = {
-        { 'toughness', { '耐久' }, field(item, 'toughness') },
-        { 'firerate', { '攻速', '发射速度' }, field(item, 'firerate') },
-        { 'damage', { '伤害' }, field(item, 'damage') },
-        { 'producetime', { '生产速度', '生产时间' }, field(item, 'producetime') },
-        { 'production', { '提供能量' }, field(item, 'production') },
-        { 'special', { '特点' }, field(item, 'special') },
-        { 'evocation', { '技能' }, field(item, 'evocation') },
-    }
-    for _, spec in ipairs(outputFields) do
-        local name, aliases, value = spec[1], spec[2], spec[3]
-        table.insert(result, ' | ' .. name .. ' = ' .. (override(frame, name, aliases) or formatNumber(value or '') or ''))
+    local properties = override(frame, 'properties', { '属性' })
+    if properties ~= nil then
+        if properties ~= '' then
+            table.insert(result, properties)
+        end
+    else
+        local outputFields = {
+            { 'toughness', { '耐久' }, field(item, 'toughness') },
+            { 'firerate', { '攻速', '发射速度' }, field(item, 'firerate') },
+            { 'damage', { '伤害' }, field(item, 'damage') },
+            { 'producetime', { '生产速度', '生产时间' }, field(item, 'producetime') },
+            { 'production', { '提供能量' }, field(item, 'production') },
+            { 'special', { '特点', '特殊' }, field(item, 'special') },
+            { 'evocation', { '技能' }, field(item, 'evocation') },
+        }
+        for _, spec in ipairs(outputFields) do
+            local name, aliases, value = spec[1], spec[2], spec[3]
+            table.insert(result, ' | ' .. name .. ' = ' .. (override(frame, name, aliases) or formatNumber(value or '') or ''))
+        end
     end
 
-    table.insert(result, ' | flavor = ' .. (override(frame, 'flavor', { '描述' }) or plain(join(item.flavor, '<br>'))))
+    table.insert(result, ' | flavor = ' .. (override(frame, 'flavor', { '描述' }) or join(item.flavor, '<br>')))
     if item.type ~= 'enemy' then
         table.insert(result, ' | cost = ' .. (override(frame, 'cost', { '花费' }) or formatNumber(item.cost or field(item, 'cost') or '') or ''))
     end
-    table.insert(result, ' | recharge = ' .. (override(frame, 'recharge', { '冷却时间', '充能时间' }) or recharge(item) or ''))
+    table.insert(result, ' | recharge = ' .. (override(frame, 'recharge', { '冷却', '冷却时间', '充能时间' }) or recharge(item) or ''))
 
     return table.concat(result, '\n')
 end

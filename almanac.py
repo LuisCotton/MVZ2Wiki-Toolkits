@@ -14,6 +14,8 @@ INLINE_TAG_RE = re.compile(r'<tag\s+([^<>]*?)/\s*>', re.I)
 ROTATE_RE = re.compile(r'</?rotate(?:=(?:"[^"]*"|\'[^\']*\'))?\s*>', re.I)
 ALIGN_RE = re.compile(r'<align\s*=\s*(["\']?)([^"\'>\s]+)\1\s*>(.*?)</align>', re.I | re.S)
 COLOR_RE = re.compile(r'<color\s*=\s*(["\']?)([^"\'>\s]+)\1\s*>(.*?)</color>', re.I | re.S)
+SHORT_COLOR_RE = re.compile(r'<(#[0-9a-f]{3,8})\s*>(.*?)</color>', re.I | re.S)
+SHORT_COLOR_OPEN_RE = re.compile(r'<(#[0-9a-f]{3,8})\s*>', re.I)
 WIKI_LINK_RE = re.compile(r'\[\[.*?]]', re.S)
 HASH_LINE_RE = re.compile(r'^(#+)(.*?)(#+)$')
 HTML_TAG_RE = re.compile(r'<[^>]+>')
@@ -208,6 +210,10 @@ PROPERTY_TAGS = {
     "flying_enemy": "flying",
     "triggerActive": "can_trigger",
     "isFire": "fire",
+    "immune_fire": "fire_immunity",
+    "immune_lightning": "lightning_immunity",
+    "immune_slowing": "control_immunity",
+    "immune_vortex": "stable",
 }
 
 
@@ -246,6 +252,19 @@ def normalize_markup(value, entity_names, tag_definitions=None, enums=None):
     value = ROTATE_RE.sub("", value)
     value = ALIGN_RE.sub(lambda match: f'<div style="text-align:{match.group(2)};">{match.group(3)}</div>', value)
     value = COLOR_RE.sub(lambda match: f'<span style="color:{match.group(2)};">{match.group(3)}</span>', value)
+    value = SHORT_COLOR_RE.sub(lambda match: f'<span style="color:{match.group(1)};">{match.group(2)}</span>', value)
+    if SHORT_COLOR_OPEN_RE.search(value):
+        opened = False
+
+        def switch_short_color(match):
+            nonlocal opened
+            prefix = "</span>" if opened else ""
+            opened = True
+            return f'{prefix}<span style="color:{match.group(1)};">'
+
+        value = SHORT_COLOR_OPEN_RE.sub(switch_short_color, value)
+        if opened:
+            value += "</span>"
     value = HASH_LINE_RE.sub(lambda match: f"<nowiki>{match.group(1)}</nowiki>{match.group(2)}<nowiki>{match.group(3)}</nowiki>", value)
 
     def replace_ref(match):
@@ -395,6 +414,7 @@ def load_almanac(root):
             {"id": short(tag.get("id", "")), "value": tag.get("value") or tag.get("enum")}
             for tag in entry.findall("./tags/tag") if tag.get("id")
         ]
+        tags_element = entry.find("tags")
         result[entry_id] = {
             "id": entry_id,
             "header": paragraphs(entry.find("header")),
@@ -402,6 +422,7 @@ def load_almanac(root):
             "flavor": flavors,
             "variables": variable_map(entry.find("variables")),
             "sourceTags": tags,
+            "sourceTagEntity": short(tags_element.get("sourceEntity", "")) if tags_element is not None else "",
         }
     return result
 
@@ -552,9 +573,10 @@ class Resolver:
         path = str(args[0])
         target = short(str(args[1])) if len(args) > 1 and args[1] else owner
         domain = str(args[2]).lower() if len(args) > 2 else "entity"
-        if domain != "entity":
-            return ""
-        values = self.entries.get(target, {}).get("entityProperties", {})
+        if domain == "entity":
+            values = self.entries.get(target, {}).get("entityProperties", {})
+        else:
+            values = {}
         candidates = [path]
         if path.startswith("mvz2:entity/"):
             candidates.append("mvz2:" + path.split("/", 1)[1])
@@ -573,6 +595,8 @@ class Resolver:
             value = self.node(tree.body)
             if isinstance(value, float) and value.is_integer():
                 value = int(value)
+            elif isinstance(value, float):
+                value = format(value, ".15g")
             return str(value)
         except (SyntaxError, TypeError, ValueError, ZeroDivisionError):
             return text.strip("\"'")
@@ -670,7 +694,7 @@ def make_tags(item, tag_definitions=None, enums=None):
                 return
         add(definition, enum_value, priority)
 
-    values = item.get("entityProperties", {})
+    values = item.get("tagProperties", item.get("entityProperties", {}))
     placement = short(values.get("mvz2:placement", ""))
     add_by_id("placement_" + placement)
 
@@ -693,6 +717,10 @@ def make_tags(item, tag_definitions=None, enums=None):
     add_by_id("mass", mass, 2500)
     category = short(values.get("mvz2:Category", ""))
     add_by_id("category", category, 2600)
+
+    # waterInteraction=3 表示实体可在水中活动，对应图鉴的“不会溺水”。
+    if short(str(values.get("mvz2:waterInteraction", ""))) == "3":
+        add_by_id("drownproof")
 
     for prop, prop_value in values.items():
         if str(prop_value).lower() != "true":
@@ -758,7 +786,7 @@ def compact(item, tag_definitions=None, enums=None):
 def plain_text(value):
     if not isinstance(value, str):
         return ""
-    value = value.replace("<br>", "\n")
+    value = re.sub(r"<br\s*/?>", "\n", value, flags=re.I)
     value = HTML_TAG_RE.sub("", value)
     return value.strip()
 
@@ -767,6 +795,7 @@ def almanac_fields(properties):
     result = {}
     mapping = {
         "耐久": "toughness",
+        "生命": "toughness",
         "发射速度": "firerate",
         "攻速": "firerate",
         "攻击速度": "firerate",
@@ -775,16 +804,16 @@ def almanac_fields(properties):
         "生产速度": "producetime",
         "提供能量": "production",
         "特点": "special",
+        "特殊": "special",
         "技能": "evocation",
     }
     if isinstance(properties, str):
         properties = [properties]
     for line in properties or []:
-        text = plain_text(line)
-        if "：" not in text:
+        if not isinstance(line, str) or "：" not in line:
             continue
-        label, value = text.split("：", 1)
-        key = mapping.get(label.strip())
+        label, value = line.split("：", 1)
+        key = mapping.get(plain_text(label).strip())
         value = value.strip()
         if key and value:
             result[key] = value
@@ -908,14 +937,26 @@ def convert():
             "flavor": [],
             "variables": {},
             "sourceTags": [],
+            "sourceTagEntity": "",
         })
         entity = all_entities.get(entry_id, {})
         base_values = {**entity.get("properties", {}), **meta_properties.get(entry_id, {})}
         values = add_case_aliases({**base_values, **armor_properties(base_values, armor_health)})
+        tag_entity_id = book.get("sourceTagEntity") or entry_id
+        tag_entity = all_entities.get(tag_entity_id, entity)
+        tag_base_values = {
+            **tag_entity.get("properties", {}),
+            **meta_properties.get(tag_entity_id, {}),
+        }
+        tag_values = add_case_aliases({
+            **tag_base_values,
+            **armor_properties(tag_base_values, armor_health),
+        })
         merged[entry_id] = {
             **book,
             "name": entity.get("name", entry_id),
             "entityProperties": values,
+            "tagProperties": tag_values,
             "cost": "" if book.get("type") == "enemy" else values.get("mvz2:cost", ""),
             "rechargeId": "" if book.get("type") == "enemy" else values.get("mvz2:rechargeId", ""),
         }
